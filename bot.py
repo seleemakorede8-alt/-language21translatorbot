@@ -1,5 +1,7 @@
 import os
 import logging
+import json
+import requests
 from typing import Dict
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -10,7 +12,6 @@ from telegram.ext import (
     ContextTypes,
     filters,
 )
-from googletrans import Translator, LANGUAGES
 
 # ==================== CONFIGURATION ====================
 
@@ -26,9 +27,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Initialize translator
-translator = Translator()
-
 # Store user language preferences
 user_languages: Dict[str, str] = {}
 
@@ -41,7 +39,7 @@ LANGUAGES_DB = {
     'Italian': 'it',
     'Portuguese': 'pt',
     'Russian': 'ru',
-    'Chinese (Simplified)': 'zh-cn',
+    'Chinese (Simplified)': 'zh-CN',
     'Japanese': 'ja',
     'Korean': 'ko',
     'Arabic': 'ar',
@@ -63,6 +61,111 @@ LANGUAGES_DB = {
 }
 
 LANG_NAMES = {v: k for k, v in LANGUAGES_DB.items()}
+
+# Language names for detection
+LANG_DETECT_NAMES = {
+    'en': 'English',
+    'es': 'Spanish',
+    'fr': 'French',
+    'de': 'German',
+    'it': 'Italian',
+    'pt': 'Portuguese',
+    'ru': 'Russian',
+    'zh-CN': 'Chinese (Simplified)',
+    'ja': 'Japanese',
+    'ko': 'Korean',
+    'ar': 'Arabic',
+    'hi': 'Hindi',
+    'bn': 'Bengali',
+    'ur': 'Urdu',
+    'fa': 'Persian',
+    'tr': 'Turkish',
+    'nl': 'Dutch',
+    'el': 'Greek',
+    'he': 'Hebrew',
+    'th': 'Thai',
+    'vi': 'Vietnamese',
+    'id': 'Indonesian',
+    'ms': 'Malay',
+    'tl': 'Filipino',
+    'sw': 'Swahili',
+    'zu': 'Zulu',
+}
+
+# ==================== TRANSLATION FUNCTIONS ====================
+
+def translate_text(text: str, target_lang: str) -> dict:
+    """Translate text using Google Translate API."""
+    try:
+        url = "https://translate.googleapis.com/translate_a/single"
+        params = {
+            "client": "gtx",
+            "sl": "auto",
+            "tl": target_lang,
+            "dt": "t",
+            "q": text
+        }
+        
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+        
+        data = response.json()
+        
+        # Parse the translation
+        translated_text = ""
+        for item in data[0]:
+            if item[0]:
+                translated_text += item[0]
+        
+        # Get detected language
+        detected_lang = data[2] if len(data) > 2 else "en"
+        
+        return {
+            "success": True,
+            "translated": translated_text,
+            "detected": detected_lang
+        }
+        
+    except Exception as e:
+        logger.error(f"Translation error: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+def detect_language(text: str) -> dict:
+    """Detect language using Google Translate API."""
+    try:
+        url = "https://translate.googleapis.com/translate_a/single"
+        params = {
+            "client": "gtx",
+            "sl": "auto",
+            "tl": "en",
+            "dt": "t",
+            "dt": "ld",
+            "q": text
+        }
+        
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+        
+        data = response.json()
+        
+        # Get detected language from response
+        detected_lang = data[2] if len(data) > 2 else "en"
+        
+        return {
+            "success": True,
+            "language": detected_lang
+        }
+        
+    except Exception as e:
+        logger.error(f"Detection error: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
 
 # ==================== COMMAND HANDLERS ====================
 
@@ -170,23 +273,24 @@ async def detect_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ That message doesn't contain any text.")
         return
     
-    try:
-        detection = translator.detect(text)
-        lang_name = LANGUAGES.get(detection.lang, detection.lang).title()
-        confidence = detection.confidence * 100
+    # Show typing indicator
+    await update.message.chat.send_action(action="typing")
+    
+    result = detect_language(text)
+    
+    if result["success"]:
+        detected = result["language"]
+        lang_name = LANG_DETECT_NAMES.get(detected, detected)
         
         response = (
             f"🔍 *Language Detection Result*\n\n"
             f"📝 *Text:*\n\"{text[:200]}{'...' if len(text) > 200 else ''}\"\n\n"
             f"🌍 *Language:* *{lang_name}*\n"
-            f"🏷️ *Code:* `{detection.lang}`\n"
-            f"📊 *Confidence:* {confidence:.1f}%"
+            f"🏷️ *Code:* `{detected}`"
         )
         
         await update.message.reply_text(response, parse_mode='Markdown')
-        
-    except Exception as e:
-        logger.error(f"Detection error: {e}")
+    else:
         await update.message.reply_text(f"❌ Error detecting language. Please try again.")
 
 
@@ -273,30 +377,28 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     target_lang = user_languages.get(user_id, 'en')
     target_name = LANG_NAMES.get(target_lang, 'English')
     
-    try:
-        # Show typing indicator
-        await update.message.chat.send_action(action="typing")
-        
-        # Translate the text
-        result = translator.translate(text, dest=target_lang)
-        
-        # Detect source language
-        detection = translator.detect(text)
-        source_name = LANGUAGES.get(detection.lang, detection.lang).title()
+    # Show typing indicator
+    await update.message.chat.send_action(action="typing")
+    
+    # Translate the text
+    result = translate_text(text, target_lang)
+    
+    if result["success"]:
+        translated = result["translated"]
+        detected = result["detected"]
+        source_name = LANG_DETECT_NAMES.get(detected, detected)
         
         # Format response
         response = (
             f"🔄 *Translation to {target_name}*\n\n"
             f"📝 *Original:*\n{text}\n\n"
-            f"🌍 *Translated:*\n{result.text}\n\n"
+            f"🌍 *Translated:*\n{translated}\n\n"
             f"🔍 Detected: *{source_name}* → *{target_name}*"
         )
         
         await update.message.reply_text(response, parse_mode='Markdown')
-        logger.info(f"Translated for user {user_id}: {detection.lang} -> {target_lang}")
-        
-    except Exception as e:
-        logger.error(f"Translation error for user {user_id}: {e}")
+        logger.info(f"Translated for user {user_id}: {detected} -> {target_lang}")
+    else:
         await update.message.reply_text(
             f"❌ *Translation Failed*\n\n"
             f"Sorry, I couldn't translate your message.\n"
