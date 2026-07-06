@@ -1,43 +1,15 @@
-# Python
 __pycache__/
-*.py[cod]
-*$py.class
-*.so
+*.pyc
+*.pyo
+*.pyd
 .Python
 env/
 venv/
-ENV/
-env.bak/
-venv.bak/
-
-# Environment variables
+.venv/
 .env
 .env.local
-.env.*.local
-
-# Railway
-.railway/
-
-# IDE
+.DS_Store
+*.log
+*.sqlite3
 .vscode/
 .idea/
-*.swp
-*.swo
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Logs
-*.log
-*.csv
-
-# Database
-*.db
-*.sqlite3
-
-# Distribution
-dist/
-build/
-*.egg-info/
-*.egg
